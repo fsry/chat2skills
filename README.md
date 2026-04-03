@@ -1,5 +1,6 @@
 # Chat2Skills
 
+本项目目标是通过对话生成skill，从而使不同行业的人（哪怕对计算机0基础），也能将自己的专业知识转换为skill
 一个基于 TypeScript、Next.js、shadcn/ui 和 Vercel AI SDK 的本地工作台，用来把问卷回答整理成多种 skill 文档。
 
 ## 功能
@@ -47,7 +48,37 @@ GOOGLE_MODEL=gemini-2.5-flash
 npm run dev
 ```
 
-打开 `http://localhost:3000`。
+打开 `http://localhost:4744`。
+
+## Docker 部署
+
+1. 构建镜像：
+
+```bash
+docker build -t chat2skill .
+```
+
+2. 运行容器：
+
+```bash
+docker run -d --name chat2skills -p 4744:4744 --env-file .env.local chat2skill
+```
+
+## Docker Compose 部署
+
+项目已提供 `docker-compose.yml`，可直接启动：
+
+```bash
+docker compose up -d --build
+```
+
+停止并移除容器：
+
+```bash
+docker compose down
+```
+
+说明：`docker-compose.yml` 已将本地 `storage` 挂载到容器 `/app/storage`，用于持久化导入、解析和导出文件。
 
 ## 使用流程
 

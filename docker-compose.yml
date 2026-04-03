@@ -1,0 +1,17 @@
+services:
+  chat2skills:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: chat2skill:latest
+    container_name: chat2skills
+    restart: unless-stopped
+    ports:
+      - "4744:4744"
+    env_file:
+      - .env.local
+    environment:
+      - NODE_ENV=production
+      - PORT=4744
+    volumes:
+      - ./storage:/app/storage
