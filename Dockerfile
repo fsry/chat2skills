@@ -22,6 +22,7 @@ RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/next.config.ts ./next.config.ts
+COPY --from=builder /app/QUESTION.md ./QUESTION.md
 
 # Runtime writable directories for generated artifacts.
 RUN mkdir -p /app/storage/imports /app/storage/outputs
