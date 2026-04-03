@@ -42,6 +42,11 @@ GOOGLE_MODEL=gemini-2.5-flash
 
 说明：模型只读取环境变量，不再使用前端默认值。
 
+存储路径说明：
+- 本地默认写入 `./storage`。
+- 在 Vercel 环境自动写入 `/tmp/chat2skills`（避免写入只读的 `/var/task`）。
+- 可通过 `CHAT2SKILLS_STORAGE_ROOT` 自定义存储目录。
+
 3. 启动开发服务器：
 
 ```bash

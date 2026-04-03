@@ -3,6 +3,7 @@ import path from "node:path";
 
 import JSZip from "jszip";
 
+import { getStorageRoot } from "@/lib/storage-paths";
 import type {
   AppState,
   ImportedFileInfo,
@@ -11,7 +12,7 @@ import type {
   SavedResponse,
 } from "@/lib/types";
 
-const STORAGE_ROOT = path.join(process.cwd(), "storage");
+const STORAGE_ROOT = getStorageRoot();
 const IMPORTS_ROOT = path.join(STORAGE_ROOT, "imports");
 const OUTPUTS_ROOT = path.join(STORAGE_ROOT, "outputs");
 const STATE_PATH = path.join(STORAGE_ROOT, "state.json");

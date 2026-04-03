@@ -14,6 +14,7 @@ import {
   resolveProviderId,
   type ProviderId,
 } from "@/lib/ai-providers";
+import { getOutputsRoot } from "@/lib/storage-paths";
 
 export const runtime = "nodejs";
 
@@ -30,7 +31,7 @@ const chatRequestSchema = z.object({
 });
 
 const MAX_USER_INPUT_CHARS = 24000;
-const OUTPUTS_ROOT = path.join(process.cwd(), "storage", "outputs");
+const OUTPUTS_ROOT = getOutputsRoot();
 
 function resolveAnalysisFileName(analysisMode: "openclaw-skill" | "claude-skill" | "gpt-prompt-skill") {
   switch (analysisMode) {

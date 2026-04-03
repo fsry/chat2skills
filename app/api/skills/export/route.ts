@@ -4,9 +4,11 @@ import path from "node:path";
 import JSZip from "jszip";
 import { z } from "zod";
 
+import { getOutputsRoot } from "@/lib/storage-paths";
+
 export const runtime = "nodejs";
 
-const OUTPUTS_ROOT = path.join(process.cwd(), "storage", "outputs");
+const OUTPUTS_ROOT = getOutputsRoot();
 
 const exportSchema = z.object({
   analysisMode: z.enum(["openclaw-skill", "claude-skill", "gpt-prompt-skill", "all-skills"]),
