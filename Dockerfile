@@ -1,7 +1,7 @@
-FROM node:20-alpine AS base
+ARG NODE_IMAGE=node:20
+FROM ${NODE_IMAGE} AS base
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
-RUN apk add --no-cache libc6-compat
 
 FROM base AS deps
 COPY package.json package-lock.json ./

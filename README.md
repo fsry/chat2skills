@@ -58,6 +58,12 @@ npm run dev
 docker build -t chat2skill .
 ```
 
+如果出现 `load metadata for docker.io/library/node:*` 这类网络错误，可改用镜像源：
+
+```bash
+docker build -t chat2skill --build-arg NODE_IMAGE=registry.cn-hangzhou.aliyuncs.com/library/node:20-alpine .
+```
+
 2. 运行容器：
 
 ```bash
