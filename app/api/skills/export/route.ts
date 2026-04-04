@@ -14,7 +14,13 @@ const exportSchema = z.object({
   analysisMode: z.enum(["openclaw-skill", "claude-skill", "gpt-prompt-skill", "all-skills"]),
   sourceFileName: z.string().nullable().optional(),
   questionId: z.string().nullable().optional(),
-  currentSkills: z.record(z.enum(["openclaw-skill", "claude-skill", "gpt-prompt-skill"]), z.string()).optional(),
+  currentSkills: z
+    .object({
+      "openclaw-skill": z.string().optional(),
+      "claude-skill": z.string().optional(),
+      "gpt-prompt-skill": z.string().optional(),
+    })
+    .optional(),
 });
 
 export async function POST(request: Request) {

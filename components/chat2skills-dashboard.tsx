@@ -17,6 +17,7 @@ type Props = {
 };
 
 const ANSWERS_DRAFT_STORAGE_KEY = "chat2skills.answers.draft.v1";
+const ANALYSIS_RESULTS_STORAGE_KEY = "chat2skills.analysis.results.v1";
 const SUBMIT_DEBOUNCE_MS = 800;
 
 const ANALYSIS_MODES = [
@@ -27,6 +28,10 @@ const ANALYSIS_MODES = [
 
 type AnalysisModeId = (typeof ANALYSIS_MODES)[number]["id"];
 type AnalysisSelectionId = AnalysisModeId | "all-skills";
+type StoredAnalysisResult = {
+  content: string;
+  analyzedAt: string;
+};
 
 /** Strip Chinese numeral prefixes like "一、" "二、" from titles */
 function stripTitleNumber(title: string) {
@@ -69,7 +74,9 @@ export function Chat2SkillsDashboard({ initialState }: Props) {
   const [invalidPromptKeys, setInvalidPromptKeys] = useState<string[]>([]);
   const [statusMessage, setStatusMessage] = useState("");
   const [organizedResult, setOrganizedResult] = useState("");
-  const [analysisResultsByMode, setAnalysisResultsByMode] = useState<Record<string, string>>({});
+  const [analysisResultsByMode, setAnalysisResultsByMode] = useState<
+    Record<string, StoredAnalysisResult>
+  >({});
   const [analysisSelection, setAnalysisSelection] = useState<AnalysisSelectionId>("claude-skill");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSaving, startSaveTransition] = useTransition();
@@ -83,10 +90,6 @@ export function Chat2SkillsDashboard({ initialState }: Props) {
   const savedResponse = dashboardState.savedResponses.find(
     (item) => item.questionId === selectedQuestionId,
   );
-
-  useEffect(() => {
-    setOrganizedResult(savedResponse?.cleanedResponse ?? "");
-  }, [selectedQuestionId, savedResponse?.cleanedResponse]);
 
   useEffect(() => {
     try {
@@ -106,6 +109,44 @@ export function Chat2SkillsDashboard({ initialState }: Props) {
   }, []);
 
   useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(ANALYSIS_RESULTS_STORAGE_KEY);
+
+      if (!raw) {
+        return;
+      }
+
+      const parsed = JSON.parse(raw) as Record<
+        string,
+        string | { content?: string; analyzedAt?: string }
+      >;
+      const normalizedEntries = Object.entries(parsed).flatMap(([key, value]) => {
+        if (typeof value === "string") {
+          return [[key, { content: value, analyzedAt: new Date(0).toISOString() }] as const];
+        }
+
+        if (value && typeof value.content === "string") {
+          return [
+            [
+              key,
+              {
+                content: value.content,
+                analyzedAt: value.analyzedAt ?? new Date(0).toISOString(),
+              },
+            ] as const,
+          ];
+        }
+
+        return [];
+      });
+
+      setAnalysisResultsByMode(Object.fromEntries(normalizedEntries));
+    } catch {
+      // Ignore malformed local analysis cache data.
+    }
+  }, []);
+
+  useEffect(() => {
     const selectedQuestionStillExists = dashboardState.questions.some(
       (question) => question.id === selectedQuestionId,
     );
@@ -119,6 +160,28 @@ export function Chat2SkillsDashboard({ initialState }: Props) {
     setInvalidPromptKeys([]);
   }, [selectedQuestionId]);
 
+  useEffect(() => {
+    if (!selectedQuestion) {
+      setOrganizedResult("");
+      return;
+    }
+
+    const cachedResult = resolveDisplayedAnalysisResult(
+      selectedQuestion.id,
+      analysisSelection,
+      savedResponse?.cleanedResponse ?? "",
+      savedResponse?.savedAt,
+    );
+
+    setOrganizedResult(cachedResult);
+  }, [
+    analysisResultsByMode,
+    analysisSelection,
+    savedResponse?.cleanedResponse,
+    savedResponse?.savedAt,
+    selectedQuestion?.id,
+  ]);
+
   const latestAssistantText = organizedResult.trim();
 
   function promptKey(groupIndex: number, promptIndex: number, questionId = selectedQuestionId) {
@@ -127,6 +190,14 @@ export function Chat2SkillsDashboard({ initialState }: Props) {
 
   function analysisResultKey(questionId: string, mode: AnalysisModeId) {
     return `${questionId}:${mode}`;
+  }
+
+  function persistAnalysisResultsToLocalStorage(nextResults: Record<string, StoredAnalysisResult>) {
+    try {
+      window.localStorage.setItem(ANALYSIS_RESULTS_STORAGE_KEY, JSON.stringify(nextResults));
+    } catch {
+      // Ignore local analysis cache failures.
+    }
   }
 
   function getAnswer(groupIndex: number, promptIndex: number) {
@@ -246,14 +317,28 @@ export function Chat2SkillsDashboard({ initialState }: Props) {
   }
 
   function setAnalysisResultForMode(questionId: string, mode: AnalysisModeId, value: string) {
-    setAnalysisResultsByMode((current) => ({
-      ...current,
-      [analysisResultKey(questionId, mode)]: value,
-    }));
+    const analyzedAt = new Date().toISOString();
+
+    setAnalysisResultsByMode((current) => {
+      const nextResults = {
+        ...current,
+        [analysisResultKey(questionId, mode)]: {
+          content: value,
+          analyzedAt,
+        },
+      };
+
+      persistAnalysisResultsToLocalStorage(nextResults);
+      return nextResults;
+    });
   }
 
   function getAnalysisResultForMode(questionId: string, mode: AnalysisModeId) {
-    return analysisResultsByMode[analysisResultKey(questionId, mode)] ?? "";
+    return analysisResultsByMode[analysisResultKey(questionId, mode)]?.content ?? "";
+  }
+
+  function getAnalysisResultEntry(questionId: string, mode: AnalysisModeId) {
+    return analysisResultsByMode[analysisResultKey(questionId, mode)] ?? null;
   }
 
   function parseCombinedSkillsResult(value: string) {
@@ -321,6 +406,47 @@ export function Chat2SkillsDashboard({ initialState }: Props) {
       ...fallbackResult,
       ...parsedResult,
     };
+  }
+
+  function buildCombinedAnalysisResult(questionId: string) {
+    const sections = ANALYSIS_MODES.flatMap((mode) => {
+      const content = getAnalysisResultForMode(questionId, mode.id).trim();
+
+      if (!content) {
+        return [];
+      }
+
+      return [`# ${mode.label}\n\n${content}`];
+    });
+
+    return sections.join("\n\n---\n\n");
+  }
+
+  function resolveDisplayedAnalysisResult(
+    questionId: string,
+    selection: AnalysisSelectionId,
+    savedContent: string,
+    savedAt?: string,
+  ) {
+    if (selection === "all-skills") {
+      const combinedCachedResult = buildCombinedAnalysisResult(questionId);
+
+      return combinedCachedResult || savedContent;
+    }
+
+    const cachedResult = getAnalysisResultEntry(questionId, selection);
+
+    if (!cachedResult) {
+      return savedContent;
+    }
+
+    if (!savedAt) {
+      return cachedResult.content;
+    }
+
+    return new Date(cachedResult.analyzedAt).getTime() >= new Date(savedAt).getTime()
+      ? cachedResult.content
+      : savedContent;
   }
 
   function persistDraftToLocalStorage() {
