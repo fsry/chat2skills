@@ -1,130 +1,36 @@
-import { readFile } from "node:fs/promises";
-import path from "node:path";
-
 import JSZip from "jszip";
 import { z } from "zod";
 
-import { logExportDownload } from "@/lib/download-logs";
-import { getOutputsRoot } from "@/lib/storage-paths";
-import type { RawQuestionAnswer } from "@/lib/types";
+import {
+  readExportOutputFile,
+  resolveExportFileName,
+  syncEditedSkillsBeforeExport,
+} from "@/lib/services/skill-export-service";
+import type { SkillContentByMode } from "@/lib/types";
 
 export const runtime = "nodejs";
-
-const OUTPUTS_ROOT = getOutputsRoot();
 
 const exportSchema = z.object({
   analysisMode: z.enum(["openclaw-skill", "claude-skill", "gpt-prompt-skill", "all-skills"]),
   sourceFileName: z.string().nullable().optional(),
-  rawAnswers: z.array(
-    z.object({
-      questionId: z.string().min(1),
-      title: z.string(),
-      supplement: z.string(),
-      groups: z.array(
-        z.object({
-          id: z.string().min(1),
-          title: z.string(),
-          prompts: z.array(
-            z.object({
-              prompt: z.string(),
-              answer: z.string(),
-            }),
-          ),
-        }),
-      ),
-    }),
-  ),
+  questionId: z.string().nullable().optional(),
+  currentSkills: z.record(z.enum(["openclaw-skill", "claude-skill", "gpt-prompt-skill"]), z.string()).optional(),
 });
-
-function resolveModeFileName(mode: "openclaw-skill" | "claude-skill" | "gpt-prompt-skill") {
-  switch (mode) {
-    case "openclaw-skill":
-      return "openclaw.md";
-    case "gpt-prompt-skill":
-      return "gpt.md";
-    case "claude-skill":
-    default:
-      return "claude.md";
-  }
-}
-
-async function readOutputFile(fileName: string) {
-  try {
-    return await readFile(path.join(OUTPUTS_ROOT, fileName), "utf8");
-  } catch {
-    throw new Error(`未找到 ${fileName}，请先执行对应类型的解析后再导出。`);
-  }
-}
-
-function getRequestIp(request: Request) {
-  const xForwardedFor = request.headers.get("x-forwarded-for");
-
-  if (xForwardedFor) {
-    const forwardedIp = xForwardedFor
-      .split(",")
-      .map((item) => item.trim())
-      .find(Boolean);
-
-    if (forwardedIp) {
-      return forwardedIp;
-    }
-  }
-
-  const forwarded = request.headers.get("forwarded");
-
-  if (forwarded) {
-    const match = forwarded.match(/for=(?:"?)(\[[^\]]+\]|[^;,"]+)/i);
-
-    if (match?.[1]) {
-      return match[1].replace(/^\[|\]$/g, "");
-    }
-  }
-
-  return (
-    request.headers.get("cf-connecting-ip") ??
-    request.headers.get("x-real-ip") ??
-    request.headers.get("x-client-ip") ??
-    null
-  );
-}
-
-async function persistDownloadLog(options: {
-  request: Request;
-  analysisMode: "openclaw-skill" | "claude-skill" | "gpt-prompt-skill" | "all-skills";
-  sourceFileName: string | null;
-  rawAnswers: RawQuestionAnswer[];
-  exportedFileName: string;
-  generatedSkills: Record<string, string>;
-}) {
-  await logExportDownload({
-    analysisMode: options.analysisMode,
-    exportedFileName: options.exportedFileName,
-    sourceFileName: options.sourceFileName,
-    ipAddress: getRequestIp(options.request),
-    userAgent: options.request.headers.get("user-agent"),
-    rawAnswers: options.rawAnswers,
-    generatedSkills: options.generatedSkills,
-  });
-}
 
 export async function POST(request: Request) {
   try {
     const payload = exportSchema.parse(await request.json());
 
-    if (payload.analysisMode !== "all-skills") {
-      const fileName = resolveModeFileName(payload.analysisMode);
-      const markdown = await readOutputFile(fileName);
+    await syncEditedSkillsBeforeExport({
+      analysisMode: payload.analysisMode,
+      sourceFileName: payload.sourceFileName ?? null,
+      questionId: payload.questionId ?? null,
+      currentSkills: (payload.currentSkills ?? {}) as SkillContentByMode,
+    });
 
-      await persistDownloadLog({
-        request,
-        analysisMode: payload.analysisMode,
-        sourceFileName: payload.sourceFileName ?? null,
-        rawAnswers: payload.rawAnswers,
-        exportedFileName: fileName,
-        generatedSkills: {
-          [fileName]: markdown,
-        },
-      });
+    if (payload.analysisMode !== "all-skills") {
+      const fileName = resolveExportFileName(payload.analysisMode);
+      const markdown = await readExportOutputFile(fileName);
 
       return new Response(markdown, {
         status: 200,
@@ -137,22 +43,9 @@ export async function POST(request: Request) {
     }
 
     const zip = new JSZip();
-    const openclaw = await readOutputFile("openclaw.md");
-    const claude = await readOutputFile("claude.md");
-    const gpt = await readOutputFile("gpt.md");
-
-    await persistDownloadLog({
-      request,
-      analysisMode: payload.analysisMode,
-      sourceFileName: payload.sourceFileName ?? null,
-      rawAnswers: payload.rawAnswers,
-      exportedFileName: "skills-all.zip",
-      generatedSkills: {
-        "openclaw.md": openclaw,
-        "claude.md": claude,
-        "gpt.md": gpt,
-      },
-    });
+    const openclaw = await readExportOutputFile("openclaw.md");
+    const claude = await readExportOutputFile("claude.md");
+    const gpt = await readExportOutputFile("gpt.md");
 
     zip.file("openclaw.md", `${openclaw.trim()}\n`);
     zip.file("claude.md", `${claude.trim()}\n`);

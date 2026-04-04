@@ -7,14 +7,23 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model ExportDownloadLog {
-  id               String   @id @default(cuid())
-  createdAt        DateTime @default(now())
-  analysisMode     String
-  exportedFileName String
-  sourceFileName   String?
-  ipAddress        String?
-  userAgent        String?
-  rawAnswers       Json
-  generatedSkills  Json
+model SkillAnalysisRecord {
+  id             String   @id @default(cuid())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  sourceFileName String   @default("")
+  questionId     String
+  questionText   String?
+  analysisMode   String
+  providerId     String?
+  modelId        String?
+  ipAddress      String?
+  userAgent      String?
+  rawAnswers     Json
+  userInput      String
+  generatedSkill String?
+  status         String   @default("pending")
+  lastError      String?
+
+  @@unique([sourceFileName, questionId, analysisMode], name: "source_question_analysis_mode")
 }

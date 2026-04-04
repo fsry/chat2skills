@@ -10,7 +10,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import type { DashboardState, RawQuestionAnswer } from "@/lib/types";
+import type { DashboardState, RawQuestionAnswer, SingleAnalysisMode, SkillContentByMode } from "@/lib/types";
 
 type Props = {
   initialState: DashboardState;
@@ -61,6 +61,7 @@ export function Chat2SkillsDashboard({ initialState }: Props) {
   const [invalidPromptKeys, setInvalidPromptKeys] = useState<string[]>([]);
   const [statusMessage, setStatusMessage] = useState("");
   const [organizedResult, setOrganizedResult] = useState("");
+  const [analysisResultsByMode, setAnalysisResultsByMode] = useState<Record<string, string>>({});
   const [analysisSelection, setAnalysisSelection] = useState<AnalysisSelectionId>("claude-skill");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSaving, startSaveTransition] = useTransition();
@@ -114,6 +115,10 @@ export function Chat2SkillsDashboard({ initialState }: Props) {
 
   function promptKey(groupIndex: number, promptIndex: number, questionId = selectedQuestionId) {
     return `${questionId}:${groupIndex}:${promptIndex}`;
+  }
+
+  function analysisResultKey(questionId: string, mode: AnalysisModeId) {
+    return `${questionId}:${mode}`;
   }
 
   function getAnswer(groupIndex: number, promptIndex: number) {
@@ -232,6 +237,84 @@ export function Chat2SkillsDashboard({ initialState }: Props) {
       .filter((question) => question.groups.length > 0);
   }
 
+  function setAnalysisResultForMode(questionId: string, mode: AnalysisModeId, value: string) {
+    setAnalysisResultsByMode((current) => ({
+      ...current,
+      [analysisResultKey(questionId, mode)]: value,
+    }));
+  }
+
+  function getAnalysisResultForMode(questionId: string, mode: AnalysisModeId) {
+    return analysisResultsByMode[analysisResultKey(questionId, mode)] ?? "";
+  }
+
+  function parseCombinedSkillsResult(value: string) {
+    const trimmed = value.trim();
+
+    if (!trimmed) {
+      return {} as SkillContentByMode;
+    }
+
+    const markers = ANALYSIS_MODES.map((mode) => ({
+      id: mode.id,
+      marker: `# ${mode.label}`,
+    }));
+
+    const positions = markers
+      .map((item) => ({
+        ...item,
+        index: trimmed.indexOf(item.marker),
+      }))
+      .filter((item) => item.index >= 0)
+      .sort((left, right) => left.index - right.index);
+
+    if (positions.length === 0) {
+      return {} as SkillContentByMode;
+    }
+
+    const result: SkillContentByMode = {};
+
+    positions.forEach((currentItem, index) => {
+      const sectionStart = currentItem.index + currentItem.marker.length;
+      const sectionEnd = positions[index + 1]?.index ?? trimmed.length;
+      const content = trimmed.slice(sectionStart, sectionEnd).replace(/^\s+/, "").replace(/\n\s*---\s*$/, "").trim();
+
+      if (content) {
+        result[currentItem.id] = content;
+      }
+    });
+
+    return result;
+  }
+
+  function buildCurrentSkillsPayload(): SkillContentByMode {
+    if (!selectedQuestion) {
+      return {};
+    }
+
+    if (analysisSelection !== "all-skills") {
+      return organizedResult.trim()
+        ? { [analysisSelection]: organizedResult.trim() }
+        : {};
+    }
+
+    const parsedResult = parseCombinedSkillsResult(organizedResult);
+    const fallbackResult = ANALYSIS_MODES.reduce<SkillContentByMode>((accumulator, mode) => {
+      const existing = getAnalysisResultForMode(selectedQuestion.id, mode.id).trim();
+
+      if (existing) {
+        accumulator[mode.id] = existing;
+      }
+
+      return accumulator;
+    }, {});
+
+    return {
+      ...fallbackResult,
+      ...parsedResult,
+    };
+  }
+
   function persistDraftToLocalStorage() {
     try {
       const draft = {
@@ -318,6 +401,7 @@ export function Chat2SkillsDashboard({ initialState }: Props) {
         sourceFileName: dashboardState.importedFile?.fileName ?? null,
         providerId: selectedProviderId,
         analysisMode: mode,
+        rawAnswers: buildRawAnswersPayload(),
       }),
     });
 
@@ -337,6 +421,9 @@ export function Chat2SkillsDashboard({ initialState }: Props) {
     try {
       const text = await requestAnalysis(mode);
       setOrganizedResult(text);
+      if (selectedQuestion) {
+        setAnalysisResultForMode(selectedQuestion.id, mode, text);
+      }
       setStatusMessage(`整理完成（${ANALYSIS_MODES.find((item) => item.id === mode)?.label}），可继续编辑后再保存或导出。`);
     } catch (sendError) {
       setStatusMessage(sendError instanceof Error ? sendError.message : "提交失败，请稍后重试。");
@@ -354,6 +441,9 @@ export function Chat2SkillsDashboard({ initialState }: Props) {
 
       for (const mode of ANALYSIS_MODES) {
         const text = await requestAnalysis(mode.id);
+        if (selectedQuestion) {
+          setAnalysisResultForMode(selectedQuestion.id, mode.id, text);
+        }
         sections.push(`# ${mode.label}\n\n${text || "（无输出）"}`);
       }
 
@@ -443,8 +533,9 @@ export function Chat2SkillsDashboard({ initialState }: Props) {
         },
         body: JSON.stringify({
           analysisMode: analysisSelection,
+          questionId: selectedQuestion?.id ?? null,
           sourceFileName: dashboardState.importedFile?.fileName ?? null,
-          rawAnswers: buildRawAnswersPayload(),
+          currentSkills: buildCurrentSkillsPayload(),
         }),
       });
 

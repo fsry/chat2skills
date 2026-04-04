@@ -108,11 +108,13 @@ docker compose down
 2. 选择一个问题。
 3. 输入回答后，在“提交并整理”按钮旁的下拉框选择解析类型。
 4. 点击“提交并整理”，系统执行对应解析。
+   - 在调用 AI 前，会先把当前原始问答和用户 IP 通过 Prisma 写入 PostgreSQL。
+   - AI 分析完成后，会把生成出的 skill 回填到同一条数据库记录中。
 5. 可在整理结果区继续编辑，点击“保存”后同步到本地状态。
 6. 点击“导出”：
 	- 单类型：下载单个 `.md`。
 	- 全部解析：下载 `skills-all.zip`。
-	- 下载动作会通过 Prisma 写入 PostgreSQL，记录原始问答、导出的 skill 内容和用户 IP。
+	- 导出前会检查页面上的 skill 是否被手工修改；如果内容有变更，则覆盖数据库中的 skill；如果没有变化，则不重复写库。
 
 ## 本地输出目录
 
@@ -120,14 +122,20 @@ docker compose down
 - 解析结果：`storage/outputs/openclaw.md`、`storage/outputs/claude.md`、`storage/outputs/gpt.md`
 - 历史导出/状态文件：`storage/outputs/`、`storage/state.json`
 
-## 下载审计表
+## Skill 分析记录表
 
-下载时会写入 PostgreSQL 的 `ExportDownloadLog` 表，字段包括：
+分析时会写入 PostgreSQL 的 `SkillAnalysisRecord` 表，字段包括：
 
-- `analysisMode`
-- `exportedFileName`
 - `sourceFileName`
+- `questionId`
+- `questionText`
+- `analysisMode`
+- `providerId`
+- `modelId`
 - `ipAddress`
 - `userAgent`
 - `rawAnswers`（JSON）
-- `generatedSkills`（JSON）
+- `userInput`
+- `generatedSkill`
+- `status`
+- `lastError`

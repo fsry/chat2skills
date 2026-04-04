@@ -52,6 +52,12 @@ export type RawQuestionAnswer = {
   groups: RawAnswerGroup[];
 };
 
+export type AnalysisMode = "openclaw-skill" | "claude-skill" | "gpt-prompt-skill" | "all-skills";
+
+export type SingleAnalysisMode = Exclude<AnalysisMode, "all-skills">;
+
+export type SkillContentByMode = Partial<Record<SingleAnalysisMode, string>>;
+
 export type AppState = {
   importedFile: ImportedFileInfo | null;
   questions: QuestionItem[];
