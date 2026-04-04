@@ -1,4 +1,4 @@
-import { getPrismaClient } from "@/lib/services/prisma";
+import { getPrismaClient, hasDatabaseUrl } from "@/lib/services/prisma";
 import type { RawQuestionAnswer, SingleAnalysisMode, SkillContentByMode } from "@/lib/types";
 
 type RequestMetadata = {
@@ -54,6 +54,13 @@ function logDatabaseSkip(action: string, error: unknown, context: Record<string,
   });
 }
 
+function logDatabaseUnavailable(action: string, context: Record<string, unknown>) {
+  console.warn("[skill-analysis-record-service] database skipped because DATABASE_URL is not configured", {
+    action,
+    ...context,
+  });
+}
+
 function resolveRequestIp(headers: Headers) {
   const xForwardedFor = headers.get("x-forwarded-for");
 
@@ -89,8 +96,22 @@ function resolveRequestIp(headers: Headers) {
 export async function upsertPendingSkillAnalysis(input: UpsertPendingAnalysisInput) {
   const sourceFileName = normalizeSourceFileName(input.sourceFileName);
 
+  if (!hasDatabaseUrl()) {
+    logDatabaseUnavailable("upsertPendingSkillAnalysis", {
+      sourceFileName,
+      questionId: input.questionId,
+      analysisMode: input.analysisMode,
+    });
+
+    return null;
+  }
+
   try {
     const prisma = getPrismaClient();
+
+    if (!prisma) {
+      return null;
+    }
 
     return await prisma.skillAnalysisRecord.upsert({
       where: {
@@ -140,8 +161,22 @@ export async function upsertPendingSkillAnalysis(input: UpsertPendingAnalysisInp
 export async function completeSkillAnalysis(input: CompleteAnalysisInput) {
   const sourceFileName = normalizeSourceFileName(input.sourceFileName);
 
+  if (!hasDatabaseUrl()) {
+    logDatabaseUnavailable("completeSkillAnalysis", {
+      sourceFileName,
+      questionId: input.questionId,
+      analysisMode: input.analysisMode,
+    });
+
+    return null;
+  }
+
   try {
     const prisma = getPrismaClient();
+
+    if (!prisma) {
+      return null;
+    }
 
     return await prisma.skillAnalysisRecord.update({
       where: {
@@ -171,8 +206,22 @@ export async function completeSkillAnalysis(input: CompleteAnalysisInput) {
 export async function failSkillAnalysis(input: FailAnalysisInput) {
   const sourceFileName = normalizeSourceFileName(input.sourceFileName);
 
+  if (!hasDatabaseUrl()) {
+    logDatabaseUnavailable("failSkillAnalysis", {
+      sourceFileName,
+      questionId: input.questionId,
+      analysisMode: input.analysisMode,
+    });
+
+    return null;
+  }
+
   try {
     const prisma = getPrismaClient();
+
+    if (!prisma) {
+      return null;
+    }
 
     return await prisma.skillAnalysisRecord.update({
       where: {
@@ -202,8 +251,21 @@ export async function syncEditedSkillsIfNeeded(input: SyncEditedSkillsInput) {
   const sourceFileName = normalizeSourceFileName(input.sourceFileName);
   let updatedCount = 0;
 
+  if (!hasDatabaseUrl()) {
+    logDatabaseUnavailable("syncEditedSkillsIfNeeded", {
+      sourceFileName,
+      questionId: input.questionId,
+    });
+
+    return { updatedCount: 0 };
+  }
+
   try {
     const prisma = getPrismaClient();
+
+    if (!prisma) {
+      return { updatedCount: 0 };
+    }
 
     for (const [analysisMode, skillContent] of Object.entries(input.currentSkills) as Array<
       [SingleAnalysisMode, string | undefined]

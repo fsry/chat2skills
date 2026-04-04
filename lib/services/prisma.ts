@@ -4,7 +4,15 @@ declare global {
   var __chat2skillsPrisma: PrismaClient | undefined;
 }
 
+export function hasDatabaseUrl() {
+  return Boolean(process.env.DATABASE_URL?.trim());
+}
+
 export function getPrismaClient() {
+  if (!hasDatabaseUrl()) {
+    return null;
+  }
+
   const prismaClient =
     globalThis.__chat2skillsPrisma ??
     new PrismaClient({
