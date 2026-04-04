@@ -44,6 +44,16 @@ function normalizeSkillContent(value: string) {
   return value.trim();
 }
 
+function logDatabaseSkip(action: string, error: unknown, context: Record<string, unknown>) {
+  const message = error instanceof Error ? error.message : String(error);
+
+  console.error("[skill-analysis-record-service] database operation skipped", {
+    action,
+    message,
+    ...context,
+  });
+}
+
 function resolveRequestIp(headers: Headers) {
   const xForwardedFor = headers.get("x-forwarded-for");
 
@@ -77,135 +87,178 @@ function resolveRequestIp(headers: Headers) {
 }
 
 export async function upsertPendingSkillAnalysis(input: UpsertPendingAnalysisInput) {
-  const prisma = getPrismaClient();
   const sourceFileName = normalizeSourceFileName(input.sourceFileName);
 
-  return prisma.skillAnalysisRecord.upsert({
-    where: {
-      source_question_analysis_mode: {
+  try {
+    const prisma = getPrismaClient();
+
+    return await prisma.skillAnalysisRecord.upsert({
+      where: {
+        source_question_analysis_mode: {
+          sourceFileName,
+          questionId: input.questionId,
+          analysisMode: input.analysisMode,
+        },
+      },
+      update: {
+        questionText: input.questionText,
+        providerId: input.providerId,
+        modelId: input.modelId,
+        ipAddress: resolveRequestIp(input.headers),
+        userAgent: input.headers.get("user-agent"),
+        rawAnswers: input.rawAnswers,
+        userInput: input.userInput,
+        generatedSkill: null,
+        status: "processing",
+        lastError: null,
+      },
+      create: {
         sourceFileName,
         questionId: input.questionId,
+        questionText: input.questionText,
         analysisMode: input.analysisMode,
+        providerId: input.providerId,
+        modelId: input.modelId,
+        ipAddress: resolveRequestIp(input.headers),
+        userAgent: input.headers.get("user-agent"),
+        rawAnswers: input.rawAnswers,
+        userInput: input.userInput,
+        status: "processing",
       },
-    },
-    update: {
-      questionText: input.questionText,
-      providerId: input.providerId,
-      modelId: input.modelId,
-      ipAddress: resolveRequestIp(input.headers),
-      userAgent: input.headers.get("user-agent"),
-      rawAnswers: input.rawAnswers,
-      userInput: input.userInput,
-      generatedSkill: null,
-      status: "processing",
-      lastError: null,
-    },
-    create: {
+    });
+  } catch (error) {
+    logDatabaseSkip("upsertPendingSkillAnalysis", error, {
       sourceFileName,
       questionId: input.questionId,
-      questionText: input.questionText,
       analysisMode: input.analysisMode,
-      providerId: input.providerId,
-      modelId: input.modelId,
-      ipAddress: resolveRequestIp(input.headers),
-      userAgent: input.headers.get("user-agent"),
-      rawAnswers: input.rawAnswers,
-      userInput: input.userInput,
-      status: "processing",
-    },
-  });
+    });
+
+    return null;
+  }
 }
 
 export async function completeSkillAnalysis(input: CompleteAnalysisInput) {
-  const prisma = getPrismaClient();
   const sourceFileName = normalizeSourceFileName(input.sourceFileName);
 
-  return prisma.skillAnalysisRecord.update({
-    where: {
-      source_question_analysis_mode: {
-        sourceFileName,
-        questionId: input.questionId,
-        analysisMode: input.analysisMode,
-      },
-    },
-    data: {
-      generatedSkill: normalizeSkillContent(input.generatedSkill),
-      status: "completed",
-      lastError: null,
-    },
-  });
-}
+  try {
+    const prisma = getPrismaClient();
 
-export async function failSkillAnalysis(input: FailAnalysisInput) {
-  const prisma = getPrismaClient();
-  const sourceFileName = normalizeSourceFileName(input.sourceFileName);
-
-  return prisma.skillAnalysisRecord.update({
-    where: {
-      source_question_analysis_mode: {
-        sourceFileName,
-        questionId: input.questionId,
-        analysisMode: input.analysisMode,
-      },
-    },
-    data: {
-      status: "failed",
-      lastError: input.errorMessage,
-    },
-  });
-}
-
-export async function syncEditedSkillsIfNeeded(input: SyncEditedSkillsInput) {
-  const prisma = getPrismaClient();
-  const sourceFileName = normalizeSourceFileName(input.sourceFileName);
-  let updatedCount = 0;
-
-  for (const [analysisMode, skillContent] of Object.entries(input.currentSkills) as Array<
-    [SingleAnalysisMode, string | undefined]
-  >) {
-    const nextSkill = skillContent ? normalizeSkillContent(skillContent) : "";
-
-    if (!nextSkill) {
-      continue;
-    }
-
-    const existingRecord = await prisma.skillAnalysisRecord.findUnique({
+    return await prisma.skillAnalysisRecord.update({
       where: {
         source_question_analysis_mode: {
           sourceFileName,
           questionId: input.questionId,
-          analysisMode,
-        },
-      },
-      select: {
-        generatedSkill: true,
-      },
-    });
-
-    if (!existingRecord) {
-      continue;
-    }
-
-    if (normalizeSkillContent(existingRecord.generatedSkill ?? "") === nextSkill) {
-      continue;
-    }
-
-    await prisma.skillAnalysisRecord.update({
-      where: {
-        source_question_analysis_mode: {
-          sourceFileName,
-          questionId: input.questionId,
-          analysisMode,
+          analysisMode: input.analysisMode,
         },
       },
       data: {
-        generatedSkill: nextSkill,
+        generatedSkill: normalizeSkillContent(input.generatedSkill),
         status: "completed",
         lastError: null,
       },
     });
+  } catch (error) {
+    logDatabaseSkip("completeSkillAnalysis", error, {
+      sourceFileName,
+      questionId: input.questionId,
+      analysisMode: input.analysisMode,
+    });
 
-    updatedCount += 1;
+    return null;
+  }
+}
+
+export async function failSkillAnalysis(input: FailAnalysisInput) {
+  const sourceFileName = normalizeSourceFileName(input.sourceFileName);
+
+  try {
+    const prisma = getPrismaClient();
+
+    return await prisma.skillAnalysisRecord.update({
+      where: {
+        source_question_analysis_mode: {
+          sourceFileName,
+          questionId: input.questionId,
+          analysisMode: input.analysisMode,
+        },
+      },
+      data: {
+        status: "failed",
+        lastError: input.errorMessage,
+      },
+    });
+  } catch (error) {
+    logDatabaseSkip("failSkillAnalysis", error, {
+      sourceFileName,
+      questionId: input.questionId,
+      analysisMode: input.analysisMode,
+    });
+
+    return null;
+  }
+}
+
+export async function syncEditedSkillsIfNeeded(input: SyncEditedSkillsInput) {
+  const sourceFileName = normalizeSourceFileName(input.sourceFileName);
+  let updatedCount = 0;
+
+  try {
+    const prisma = getPrismaClient();
+
+    for (const [analysisMode, skillContent] of Object.entries(input.currentSkills) as Array<
+      [SingleAnalysisMode, string | undefined]
+    >) {
+      const nextSkill = skillContent ? normalizeSkillContent(skillContent) : "";
+
+      if (!nextSkill) {
+        continue;
+      }
+
+      const existingRecord = await prisma.skillAnalysisRecord.findUnique({
+        where: {
+          source_question_analysis_mode: {
+            sourceFileName,
+            questionId: input.questionId,
+            analysisMode,
+          },
+        },
+        select: {
+          generatedSkill: true,
+        },
+      });
+
+      if (!existingRecord) {
+        continue;
+      }
+
+      if (normalizeSkillContent(existingRecord.generatedSkill ?? "") === nextSkill) {
+        continue;
+      }
+
+      await prisma.skillAnalysisRecord.update({
+        where: {
+          source_question_analysis_mode: {
+            sourceFileName,
+            questionId: input.questionId,
+            analysisMode,
+          },
+        },
+        data: {
+          generatedSkill: nextSkill,
+          status: "completed",
+          lastError: null,
+        },
+      });
+
+      updatedCount += 1;
+    }
+  } catch (error) {
+    logDatabaseSkip("syncEditedSkillsIfNeeded", error, {
+      sourceFileName,
+      questionId: input.questionId,
+    });
+
+    return { updatedCount: 0 };
   }
 
   return { updatedCount };
