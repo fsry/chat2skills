@@ -58,6 +58,7 @@ export function Chat2SkillsDashboard({ initialState }: Props) {
     initialState.questions[0]?.id ?? "",
   );
   const [answersByPrompt, setAnswersByPrompt] = useState<Record<string, string>>({});
+  const [invalidPromptKeys, setInvalidPromptKeys] = useState<string[]>([]);
   const [statusMessage, setStatusMessage] = useState("");
   const [organizedResult, setOrganizedResult] = useState("");
   const [analysisSelection, setAnalysisSelection] = useState<AnalysisSelectionId>("claude-skill");
@@ -65,6 +66,7 @@ export function Chat2SkillsDashboard({ initialState }: Props) {
   const [isSaving, startSaveTransition] = useTransition();
   const [isExporting, startExportTransition] = useTransition();
   const lastSubmitAtRef = useRef(0);
+  const promptRefs = useRef<Record<string, HTMLTextAreaElement | null>>({});
 
   const selectedQuestion = dashboardState.questions.find(
     (question) => question.id === selectedQuestionId,
@@ -104,6 +106,10 @@ export function Chat2SkillsDashboard({ initialState }: Props) {
     }
   }, [dashboardState.questions, selectedQuestionId]);
 
+  useEffect(() => {
+    setInvalidPromptKeys([]);
+  }, [selectedQuestionId]);
+
   const latestAssistantText = organizedResult.trim();
 
   function promptKey(groupIndex: number, promptIndex: number) {
@@ -115,10 +121,62 @@ export function Chat2SkillsDashboard({ initialState }: Props) {
   }
 
   function setAnswer(groupIndex: number, promptIndex: number, value: string) {
+    const key = promptKey(groupIndex, promptIndex);
+
     setAnswersByPrompt((current) => ({
       ...current,
-      [promptKey(groupIndex, promptIndex)]: value,
+      [key]: value,
     }));
+
+    if (value.trim()) {
+      setInvalidPromptKeys((current) => current.filter((item) => item !== key));
+    }
+  }
+
+  function setPromptRef(key: string, element: HTMLTextAreaElement | null) {
+    if (element) {
+      promptRefs.current[key] = element;
+      return;
+    }
+
+    delete promptRefs.current[key];
+  }
+
+  function focusPrompt(key: string) {
+    const element = promptRefs.current[key];
+
+    if (!element) {
+      return;
+    }
+
+    element.scrollIntoView({ behavior: "smooth", block: "center" });
+    window.setTimeout(() => {
+      element.focus({ preventScroll: true });
+    }, 150);
+  }
+
+  function validateCurrentQuestionAnswers() {
+    if (!selectedQuestion) {
+      return false;
+    }
+
+    const emptyKeys = getQuestionGroups(selectedQuestion).flatMap((group, groupIndex) =>
+      group.prompts.flatMap((_, promptIndex) => {
+        const key = promptKey(groupIndex, promptIndex);
+
+        return getAnswer(groupIndex, promptIndex).trim() ? [] : [key];
+      }),
+    );
+
+    setInvalidPromptKeys(emptyKeys);
+
+    if (emptyKeys.length > 0) {
+      setStatusMessage("请先完成当前章节的所有回答，再进行分析。");
+      focusPrompt(emptyKeys[0]);
+      return false;
+    }
+
+    return true;
   }
 
   function buildSectionInput() {
@@ -150,6 +208,20 @@ export function Chat2SkillsDashboard({ initialState }: Props) {
     ].join("\n");
   }
 
+  function persistDraftToLocalStorage() {
+    try {
+      const draft = {
+        answersByPrompt,
+        updatedAt: new Date().toISOString(),
+      };
+
+      window.localStorage.setItem(ANSWERS_DRAFT_STORAGE_KEY, JSON.stringify(draft));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async function refreshState() {
     const response = await fetch("/api/state", { cache: "no-store" });
 
@@ -170,6 +242,10 @@ export function Chat2SkillsDashboard({ initialState }: Props) {
 
     if (!selectedQuestion) {
       setStatusMessage("请先从顶部选择一个章节。");
+      return;
+    }
+
+    if (!validateCurrentQuestionAnswers()) {
       return;
     }
 
@@ -273,18 +349,17 @@ export function Chat2SkillsDashboard({ initialState }: Props) {
         return;
       }
 
+      const draftSaved = persistDraftToLocalStorage();
+
       const currentEditedText = organizedResult.trim();
       if (!currentEditedText) {
-        setStatusMessage("当前没有可保存的整理结果，请先提交并整理。");
+        setStatusMessage(
+          draftSaved
+            ? "当前问答已保存到本地浏览器草稿。当前还没有可保存到服务器的整理结果，请先提交并整理。"
+            : "当前没有可保存的整理结果，且本地浏览器草稿保存失败，请稍后重试。",
+        );
         return;
       }
-
-      const draft = {
-        answersByPrompt,
-        updatedAt: new Date().toISOString(),
-      };
-
-      window.localStorage.setItem(ANSWERS_DRAFT_STORAGE_KEY, JSON.stringify(draft));
 
       const response = await fetch("/api/answers/save", {
         method: "POST",
@@ -304,7 +379,11 @@ export function Chat2SkillsDashboard({ initialState }: Props) {
       }
 
       await refreshState();
-      setStatusMessage("已保存整理结果并同步到导出内容。草稿也已保存到本地。");
+      setStatusMessage(
+        draftSaved
+          ? "已保存整理结果并同步到导出内容，当前问答草稿也已保存到本地浏览器。"
+          : "已保存整理结果并同步到导出内容，但本地浏览器草稿保存失败。",
+      );
     } catch (saveError) {
       setStatusMessage(saveError instanceof Error ? saveError.message : "保存失败，请稍后重试。");
     }
@@ -365,8 +444,8 @@ export function Chat2SkillsDashboard({ initialState }: Props) {
   }
 
   return (
-    <main className="min-h-screen bg-background px-4 py-6 sm:px-6 lg:px-8">
-      <div className="mx-auto flex max-w-4xl flex-col gap-4">
+    <main className="min-h-screen bg-background px-3 py-4 sm:px-6 sm:py-6 lg:px-8">
+      <div className="mx-auto flex max-w-4xl flex-col gap-3 sm:gap-4">
         {/* Tabs */}
         {dashboardState.questions.length === 0 ? (
           <Card className="rounded-2xl">
@@ -376,18 +455,19 @@ export function Chat2SkillsDashboard({ initialState }: Props) {
           </Card>
         ) : (
           <>
-            <ScrollArea className="w-full whitespace-nowrap">
+            <ScrollArea className="-mx-1 w-[calc(100%+0.5rem)] whitespace-nowrap px-1 sm:mx-0 sm:w-full sm:px-0">
               <Tabs
                 value={selectedQuestionId}
                 onValueChange={(value) => setSelectedQuestionId(value)}
                 className="w-full"
               >
-                <TabsList className="[--radius:9999px]">
+                <TabsList className="min-w-max [--radius:9999px]">
                   {dashboardState.questions.map((question) => (
                       <TabsTrigger
                         key={question.id}
                         value={question.id}
                         onClick={() => setSelectedQuestionId(question.id)}
+                        className="min-w-max px-3 text-sm"
                       >
                         {stripTitleNumber(question.title)}
                       </TabsTrigger>
@@ -398,7 +478,7 @@ export function Chat2SkillsDashboard({ initialState }: Props) {
 
             {/* Tab content */}
             {selectedQuestion ? (
-              <div className="flex flex-col gap-4">
+              <div className="flex flex-col gap-4 sm:gap-5">
                 {(() => {
                   const groups = getQuestionGroups(selectedQuestion);
 
@@ -414,7 +494,7 @@ export function Chat2SkillsDashboard({ initialState }: Props) {
                 {/* Question groups */}
                 {groups.map((group, groupIndex) => (
                   <Card key={group.id} className="rounded-2xl">
-                    <CardContent className="flex flex-col gap-4 p-5">
+                    <CardContent className="flex flex-col gap-4 p-4 sm:p-5">
                       {group.title ? (
                         <p className="text-sm font-semibold text-foreground">{group.title}</p>
                       ) : null}
@@ -425,13 +505,18 @@ export function Chat2SkillsDashboard({ initialState }: Props) {
                             {promptIndex + 1}. {prompt}
                           </p>
                           <Textarea
+                            ref={(element) => setPromptRef(promptKey(groupIndex, promptIndex), element)}
                             value={getAnswer(groupIndex, promptIndex)}
                             onChange={(event) =>
                               setAnswer(groupIndex, promptIndex, event.target.value)
                             }
-                            className="min-h-24 resize-y text-sm"
+                            aria-invalid={invalidPromptKeys.includes(promptKey(groupIndex, promptIndex))}
+                            className="min-h-28 resize-y text-sm sm:min-h-24"
                             placeholder="请输入你的回答…"
                           />
+                          {invalidPromptKeys.includes(promptKey(groupIndex, promptIndex)) ? (
+                            <p className="text-xs text-destructive">此项为必填，请先填写后再分析。</p>
+                          ) : null}
                         </div>
                       ))}
                     </CardContent>
@@ -450,12 +535,13 @@ export function Chat2SkillsDashboard({ initialState }: Props) {
                 })()}
 
                 {/* Actions */}
-                <div className="flex items-center justify-end gap-3">
-                  <div className="flex items-center gap-2">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
+                  <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:justify-end">
                     <Button
                       variant="outline"
                       onClick={() => startExportTransition(() => void performExport())}
                       disabled={isExporting || isSubmitting || (dashboardState.savedResponses.length === 0 && !latestAssistantText)}
+                      className="w-full sm:w-auto"
                     >
                       {isExporting ? (
                         <LoaderCircle data-icon="inline-start" className="animate-spin" />
@@ -468,6 +554,7 @@ export function Chat2SkillsDashboard({ initialState }: Props) {
                       variant="outline"
                       disabled={isSaving}
                       onClick={() => startSaveTransition(() => void performSave())}
+                      className="w-full sm:w-auto"
                     >
                       {isSaving ? (
                         <LoaderCircle data-icon="inline-start" className="animate-spin" />
@@ -480,7 +567,7 @@ export function Chat2SkillsDashboard({ initialState }: Props) {
                       value={analysisSelection}
                       onChange={(event) => setAnalysisSelection(event.target.value as AnalysisSelectionId)}
                       disabled={isSubmitting}
-                      className="h-9 rounded-md border border-border bg-background px-3 text-sm"
+                      className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm sm:h-9 sm:w-auto"
                     >
                       {ANALYSIS_MODES.map((mode) => (
                         <option key={mode.id} value={mode.id}>
@@ -492,6 +579,7 @@ export function Chat2SkillsDashboard({ initialState }: Props) {
                     <Button
                       disabled={isSubmitting}
                       onClick={() => void handleSend()}
+                      className="w-full sm:w-auto"
                     >
                       {isSubmitting ? (
                         <LoaderCircle data-icon="inline-start" className="animate-spin" />
@@ -508,14 +596,14 @@ export function Chat2SkillsDashboard({ initialState }: Props) {
                   <>
                     <Separator />
                     <Card className="rounded-2xl bg-muted/30">
-                      <CardContent className="p-5">
+                      <CardContent className="p-4 sm:p-5">
                         <p className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
                           AI 整理结果
                         </p>
                         <Textarea
                           value={organizedResult}
                           onChange={(event) => setOrganizedResult(event.target.value)}
-                          className="min-h-64 resize-y text-sm leading-7"
+                          className="min-h-56 resize-y text-sm leading-7 sm:min-h-64"
                           placeholder="整理结果将在这里显示，你可以继续编辑后保存或导出。"
                         />
                       </CardContent>
