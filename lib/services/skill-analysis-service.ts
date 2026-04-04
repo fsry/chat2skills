@@ -189,7 +189,7 @@ export async function analyzeSkill(input: AnalyzeSkillInput) {
   });
 
   try {
-    await mkdir(OUTPUTS_ROOT, { recursive: true });
+    await mkdir(OUTPUTS_ROOT, { recursive: true }).catch(() => {});
     await writeFile(
       path.join(OUTPUTS_ROOT, "experience.json"),
       `${JSON.stringify(
@@ -207,7 +207,7 @@ export async function analyzeSkill(input: AnalyzeSkillInput) {
         2,
       )}\n`,
       "utf8",
-    );
+    ).catch(() => {});
 
     const result = await generateText({
       model: createModel(provider.id, modelId),
@@ -281,7 +281,7 @@ export async function analyzeSkill(input: AnalyzeSkillInput) {
       path.join(OUTPUTS_ROOT, resolveAnalysisFileName(analysisMode)),
       `${cleanedText}\n`,
       "utf8",
-    );
+    ).catch(() => {});
 
     await completeSkillAnalysis({
       sourceFileName: input.sourceFileName ?? null,

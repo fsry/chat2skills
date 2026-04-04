@@ -28,8 +28,12 @@ export async function readExportOutputFile(fileName: string) {
 }
 
 async function writeExportOutputFile(fileName: string, content: string) {
-  await mkdir(OUTPUTS_ROOT, { recursive: true });
-  await writeFile(path.join(OUTPUTS_ROOT, fileName), `${content.trim()}\n`, "utf8");
+  try {
+    await mkdir(OUTPUTS_ROOT, { recursive: true });
+    await writeFile(path.join(OUTPUTS_ROOT, fileName), `${content.trim()}\n`, "utf8");
+  } catch (err) {
+    console.warn(`[skill-export] 写入 ${fileName} 失败（已忽略）:`, (err as Error).message);
+  }
 }
 
 export function resolveExportFileName(mode: SingleAnalysisMode) {

@@ -36,10 +36,11 @@ export async function POST(request: Request) {
       currentSkills: (payload.currentSkills ?? {}) as SkillContentByMode,
     });
 
+    // Best-effort disk write — ignore failures on read-only file systems
     await ensureExportOutputFiles({
       analysisMode: payload.analysisMode,
       currentSkills: (payload.currentSkills ?? {}) as SkillContentByMode,
-    });
+    }).catch(() => {});
 
     if (payload.analysisMode !== "all-skills") {
       const fileName = resolveExportFileName(payload.analysisMode);
