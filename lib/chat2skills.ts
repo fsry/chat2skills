@@ -17,8 +17,7 @@ const IMPORTS_ROOT = path.join(STORAGE_ROOT, "imports");
 const OUTPUTS_ROOT = path.join(STORAGE_ROOT, "outputs");
 const STATE_PATH = path.join(STORAGE_ROOT, "state.json");
 const PROJECT_ROOT = process.cwd();
-const DEFAULT_QUESTION_FILE = "QUESTION.md";
-const DEFAULT_QUESTION_PATH = path.join(PROJECT_ROOT, DEFAULT_QUESTION_FILE);
+const DEFAULT_QUESTION_FILE_CANDIDATES = ["QUESTION.md", "question.md"];
 const IGNORED_DIRECTORIES = new Set([
   ".git",
   ".next",
@@ -154,7 +153,13 @@ function dedupeSavedResponsesByQuestionId(savedResponses: SavedResponse[]) {
 
 async function syncQuestionsFromDefaultQuestionFile(state: AppState) {
   try {
-    const markdown = await readFile(DEFAULT_QUESTION_PATH, "utf8");
+    const defaultQuestionFile = await findDefaultQuestionFile();
+
+    if (!defaultQuestionFile) {
+      return state;
+    }
+
+    const markdown = await readFile(path.join(PROJECT_ROOT, defaultQuestionFile), "utf8");
     const questions = parseMarkdownQuestions(markdown);
 
     if (questions.length === 0) {
@@ -189,6 +194,40 @@ async function syncQuestionsFromDefaultQuestionFile(state: AppState) {
   } catch {
     return state;
   }
+}
+
+async function findDefaultQuestionFile() {
+  try {
+    const rootEntries = await readdir(PROJECT_ROOT, { withFileTypes: true });
+
+    for (const candidate of DEFAULT_QUESTION_FILE_CANDIDATES) {
+      const matchedEntry = rootEntries.find(
+        (entry) => entry.isFile() && entry.name.toLowerCase() === candidate.toLowerCase(),
+      );
+
+      if (matchedEntry) {
+        return matchedEntry.name;
+      }
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function ensureImportedFileState(state: AppState) {
+  if (state.importedFile) {
+    return state;
+  }
+
+  const defaultQuestionFile = await findDefaultQuestionFile();
+
+  if (!defaultQuestionFile) {
+    return state;
+  }
+
+  return importQuestionsFromProject(defaultQuestionFile);
 }
 
 export function parseMarkdownQuestions(markdown: string): QuestionItem[] {
@@ -509,9 +548,13 @@ export async function readState(): Promise<AppState> {
       })),
     };
 
-    return syncQuestionsFromDefaultQuestionFile(normalizedState);
+    const syncedState = await syncQuestionsFromDefaultQuestionFile(normalizedState);
+
+    return ensureImportedFileState(syncedState);
   } catch {
-    return syncQuestionsFromDefaultQuestionFile(EMPTY_STATE);
+    const syncedState = await syncQuestionsFromDefaultQuestionFile(EMPTY_STATE);
+
+    return ensureImportedFileState(syncedState);
   }
 }
 
