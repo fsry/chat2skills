@@ -10,7 +10,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import type { DashboardState } from "@/lib/types";
+import type { DashboardState, RawQuestionAnswer } from "@/lib/types";
 
 type Props = {
   initialState: DashboardState;
@@ -112,8 +112,8 @@ export function Chat2SkillsDashboard({ initialState }: Props) {
 
   const latestAssistantText = organizedResult.trim();
 
-  function promptKey(groupIndex: number, promptIndex: number) {
-    return `${selectedQuestionId}:${groupIndex}:${promptIndex}`;
+  function promptKey(groupIndex: number, promptIndex: number, questionId = selectedQuestionId) {
+    return `${questionId}:${groupIndex}:${promptIndex}`;
   }
 
   function getAnswer(groupIndex: number, promptIndex: number) {
@@ -206,6 +206,30 @@ export function Chat2SkillsDashboard({ initialState }: Props) {
       "",
       "请输出结构化 markdown，总结核心经验，保留用户原意。",
     ].join("\n");
+  }
+
+  function buildRawAnswersPayload(): RawQuestionAnswer[] {
+    return dashboardState.questions
+      .map((question) => {
+        const groups = getQuestionGroups(question)
+          .map((group, groupIndex) => ({
+            id: group.id,
+            title: group.title,
+            prompts: group.prompts.map((prompt, promptIndex) => ({
+              prompt,
+              answer: answersByPrompt[promptKey(groupIndex, promptIndex, question.id)] ?? "",
+            })),
+          }))
+          .filter((group) => group.prompts.some((prompt) => prompt.answer.trim()));
+
+        return {
+          questionId: question.id,
+          title: question.title,
+          supplement: question.supplement,
+          groups,
+        };
+      })
+      .filter((question) => question.groups.length > 0);
   }
 
   function persistDraftToLocalStorage() {
@@ -417,7 +441,11 @@ export function Chat2SkillsDashboard({ initialState }: Props) {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ analysisMode: analysisSelection }),
+        body: JSON.stringify({
+          analysisMode: analysisSelection,
+          sourceFileName: dashboardState.importedFile?.fileName ?? null,
+          rawAnswers: buildRawAnswersPayload(),
+        }),
       });
 
       if (!response.ok) {

@@ -31,6 +31,7 @@ copy .env.example .env.local
 然后在 `.env.local` 中填写：
 
 ```bash
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/chat2skills?schema=public
 ANTHROPIC_API_KEY=your_key_here
 ANTHROPIC_MODEL=claude-3-5-sonnet-latest
 OPENAI_API_KEY=your_openai_key_here
@@ -48,6 +49,15 @@ GOOGLE_MODEL=gemini-2.5-flash
 - 可通过 `CHAT2SKILLS_STORAGE_ROOT` 自定义存储目录。
 
 3. 启动开发服务器：
+
+先生成 Prisma Client 并把表结构推到 PostgreSQL：
+
+```bash
+npm run db:generate
+npm run db:push
+```
+
+再启动开发服务器：
 
 ```bash
 npm run dev
@@ -90,6 +100,7 @@ docker compose down
 ```
 
 说明：`docker-compose.yml` 已将本地 `storage` 挂载到容器 `/app/storage`，用于持久化导入、解析和导出文件。
+同时会启动一个 PostgreSQL 16 容器，默认连接串为 `postgresql://postgres:postgres@localhost:5432/chat2skills?schema=public`。
 
 ## 使用流程
 
@@ -101,9 +112,22 @@ docker compose down
 6. 点击“导出”：
 	- 单类型：下载单个 `.md`。
 	- 全部解析：下载 `skills-all.zip`。
+	- 下载动作会通过 Prisma 写入 PostgreSQL，记录原始问答、导出的 skill 内容和用户 IP。
 
 ## 本地输出目录
 
 - 解析上下文：`storage/outputs/experience.json`
 - 解析结果：`storage/outputs/openclaw.md`、`storage/outputs/claude.md`、`storage/outputs/gpt.md`
 - 历史导出/状态文件：`storage/outputs/`、`storage/state.json`
+
+## 下载审计表
+
+下载时会写入 PostgreSQL 的 `ExportDownloadLog` 表，字段包括：
+
+- `analysisMode`
+- `exportedFileName`
+- `sourceFileName`
+- `ipAddress`
+- `userAgent`
+- `rawAnswers`（JSON）
+- `generatedSkills`（JSON）

@@ -34,6 +34,24 @@ export type SavedResponse = {
   skillFilePath: string;
 };
 
+export type RawPromptAnswer = {
+  prompt: string;
+  answer: string;
+};
+
+export type RawAnswerGroup = {
+  id: string;
+  title: string;
+  prompts: RawPromptAnswer[];
+};
+
+export type RawQuestionAnswer = {
+  questionId: string;
+  title: string;
+  supplement: string;
+  groups: RawAnswerGroup[];
+};
+
 export type AppState = {
   importedFile: ImportedFileInfo | null;
   questions: QuestionItem[];
