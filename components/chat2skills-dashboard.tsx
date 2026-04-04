@@ -80,7 +80,7 @@ export function Chat2SkillsDashboard({ initialState }: Props) {
   const [analysisSelection, setAnalysisSelection] = useState<AnalysisSelectionId>("claude-skill");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSaving, startSaveTransition] = useTransition();
-  const [isExporting, startExportTransition] = useTransition();
+  const [isExporting, setIsExporting] = useState(false);
   const lastSubmitAtRef = useRef(0);
   const promptRefs = useRef<Record<string, HTMLTextAreaElement | null>>({});
 
@@ -463,38 +463,8 @@ export function Chat2SkillsDashboard({ initialState }: Props) {
     }
   }
 
-  async function deliverExportFile(blob: Blob, fileName: string) {
-    const file = new File([blob], fileName, {
-      type: blob.type || "application/octet-stream",
-    });
-    const canShareFiles =
-      typeof navigator !== "undefined" &&
-      typeof navigator.share === "function" &&
-      typeof navigator.canShare === "function" &&
-      navigator.canShare({ files: [file] });
-
-    if (canShareFiles) {
-      await navigator.share({
-        files: [file],
-        title: fileName,
-      });
-
-      return "shared" as const;
-    }
-
+  function downloadFileOnDesktop(blob: Blob, fileName: string) {
     const downloadUrl = window.URL.createObjectURL(blob);
-
-    if (isMobileBrowser()) {
-      const previewWindow = window.open(downloadUrl, "_blank", "noopener,noreferrer");
-
-      window.setTimeout(() => {
-        window.URL.revokeObjectURL(downloadUrl);
-      }, 60_000);
-
-      if (previewWindow) {
-        return "opened" as const;
-      }
-    }
 
     const anchor = document.createElement("a");
 
@@ -507,6 +477,39 @@ export function Chat2SkillsDashboard({ initialState }: Props) {
     window.URL.revokeObjectURL(downloadUrl);
 
     return "downloaded" as const;
+  }
+
+  function openFileOnMobile(blob: Blob) {
+    const downloadUrl = window.URL.createObjectURL(blob);
+
+    const previewWindow = window.open(downloadUrl, "_blank", "noopener,noreferrer");
+
+    window.setTimeout(() => {
+      window.URL.revokeObjectURL(downloadUrl);
+    }, 60_000);
+
+    if (previewWindow) {
+      return "opened" as const;
+    }
+
+    const anchor = document.createElement("a");
+
+    anchor.href = downloadUrl;
+    anchor.target = "_blank";
+    anchor.rel = "noopener";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+
+    return "opened" as const;
+  }
+
+  function deliverExportFile(blob: Blob, fileName: string) {
+    if (isMobileBrowser()) {
+      return openFileOnMobile(blob);
+    }
+
+    return downloadFileOnDesktop(blob, fileName);
   }
 
   async function refreshState() {
@@ -684,27 +687,10 @@ export function Chat2SkillsDashboard({ initialState }: Props) {
   }
 
   async function performExport() {
+    setIsExporting(true);
+
     try {
-      const currentEditedText = organizedResult.trim();
-
-      if (selectedQuestion && currentEditedText) {
-        const saveResponse = await fetch("/api/answers/save", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            questionId: selectedQuestion.id,
-            answer: currentEditedText,
-          }),
-        });
-
-        const savePayload = (await saveResponse.json()) as { error?: string };
-
-        if (!saveResponse.ok) {
-          throw new Error(savePayload.error ?? "导出前保存失败。请稍后重试。");
-        }
-      }
+      setStatusMessage("正在准备导出文件...");
 
       const response = await fetch("/api/skills/export", {
         method: "POST",
@@ -726,13 +712,7 @@ export function Chat2SkillsDashboard({ initialState }: Props) {
 
       const blob = await response.blob();
       const exportFileName = response.headers.get("x-export-file") ?? "claude-skills.zip";
-      const deliveryMode = await deliverExportFile(blob, exportFileName);
-
-      await refreshState();
-      if (deliveryMode === "shared") {
-        setStatusMessage("已调起系统分享，可直接保存或发送导出的文件。");
-        return;
-      }
+      const deliveryMode = deliverExportFile(blob, exportFileName);
 
       if (deliveryMode === "opened") {
         setStatusMessage("已在新页面打开导出文件，手机端可使用浏览器的保存或分享能力完成下载。");
@@ -741,12 +721,9 @@ export function Chat2SkillsDashboard({ initialState }: Props) {
 
       setStatusMessage(analysisSelection === "all-skills" ? "三种 skill 已打包导出。" : "单个 Markdown 文件已导出。");
     } catch (exportError) {
-      if (exportError instanceof DOMException && exportError.name === "AbortError") {
-        setStatusMessage("已取消导出分享。");
-        return;
-      }
-
       setStatusMessage(exportError instanceof Error ? exportError.message : "导出失败。");
+    } finally {
+      setIsExporting(false);
     }
   }
 
@@ -846,7 +823,7 @@ export function Chat2SkillsDashboard({ initialState }: Props) {
                   <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:justify-end">
                     <Button
                       variant="outline"
-                      onClick={() => startExportTransition(() => void performExport())}
+                      onClick={() => void performExport()}
                       disabled={isExporting || isSubmitting || (dashboardState.savedResponses.length === 0 && !latestAssistantText)}
                       className="w-full sm:w-auto"
                     >
