@@ -51,6 +51,14 @@ function getQuestionGroups(question: DashboardState["questions"][number]) {
   return [];
 }
 
+function isMobileBrowser() {
+  if (typeof navigator === "undefined") {
+    return false;
+  }
+
+  return /android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent);
+}
+
 export function Chat2SkillsDashboard({ initialState }: Props) {
   const [dashboardState, setDashboardState] = useState(initialState);
   const selectedProviderId = initialState.defaultProviderId;
@@ -329,6 +337,52 @@ export function Chat2SkillsDashboard({ initialState }: Props) {
     }
   }
 
+  async function deliverExportFile(blob: Blob, fileName: string) {
+    const file = new File([blob], fileName, {
+      type: blob.type || "application/octet-stream",
+    });
+    const canShareFiles =
+      typeof navigator !== "undefined" &&
+      typeof navigator.share === "function" &&
+      typeof navigator.canShare === "function" &&
+      navigator.canShare({ files: [file] });
+
+    if (canShareFiles) {
+      await navigator.share({
+        files: [file],
+        title: fileName,
+      });
+
+      return "shared" as const;
+    }
+
+    const downloadUrl = window.URL.createObjectURL(blob);
+
+    if (isMobileBrowser()) {
+      const previewWindow = window.open(downloadUrl, "_blank", "noopener,noreferrer");
+
+      window.setTimeout(() => {
+        window.URL.revokeObjectURL(downloadUrl);
+      }, 60_000);
+
+      if (previewWindow) {
+        return "opened" as const;
+      }
+    }
+
+    const anchor = document.createElement("a");
+
+    anchor.href = downloadUrl;
+    anchor.download = fileName;
+    anchor.rel = "noopener";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.URL.revokeObjectURL(downloadUrl);
+
+    return "downloaded" as const;
+  }
+
   async function refreshState() {
     const response = await fetch("/api/state", { cache: "no-store" });
 
@@ -545,19 +599,27 @@ export function Chat2SkillsDashboard({ initialState }: Props) {
       }
 
       const blob = await response.blob();
-      const downloadUrl = window.URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-
-      anchor.href = downloadUrl;
-      anchor.download = response.headers.get("x-export-file") ?? "claude-skills.zip";
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-      window.URL.revokeObjectURL(downloadUrl);
+      const exportFileName = response.headers.get("x-export-file") ?? "claude-skills.zip";
+      const deliveryMode = await deliverExportFile(blob, exportFileName);
 
       await refreshState();
-      setStatusMessage(analysisSelection === "all-skills" ? "三种 skill 已打包导出。" : "单个 Markdown 文件已导出。" );
+      if (deliveryMode === "shared") {
+        setStatusMessage("已调起系统分享，可直接保存或发送导出的文件。");
+        return;
+      }
+
+      if (deliveryMode === "opened") {
+        setStatusMessage("已在新页面打开导出文件，手机端可使用浏览器的保存或分享能力完成下载。");
+        return;
+      }
+
+      setStatusMessage(analysisSelection === "all-skills" ? "三种 skill 已打包导出。" : "单个 Markdown 文件已导出。");
     } catch (exportError) {
+      if (exportError instanceof DOMException && exportError.name === "AbortError") {
+        setStatusMessage("已取消导出分享。");
+        return;
+      }
+
       setStatusMessage(exportError instanceof Error ? exportError.message : "导出失败。");
     }
   }
