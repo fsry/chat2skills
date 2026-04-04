@@ -67,6 +67,34 @@ export async function ensureExportOutputFiles(input: {
   await writeExportOutputFile(resolveModeFileName(input.analysisMode), singleModeContent);
 }
 
+export async function resolveExportContent(input: {
+  analysisMode: SingleAnalysisMode;
+  currentSkills: SkillContentByMode;
+}) {
+  const inlineContent = input.currentSkills[input.analysisMode]?.trim();
+
+  if (inlineContent) {
+    return inlineContent;
+  }
+
+  return readExportOutputFile(resolveModeFileName(input.analysisMode));
+}
+
+export async function resolveAllExportContents(currentSkills: SkillContentByMode) {
+  const entries = await Promise.all(
+    (["openclaw-skill", "claude-skill", "gpt-prompt-skill"] as const).map(async (mode) => {
+      const content = await resolveExportContent({
+        analysisMode: mode,
+        currentSkills,
+      });
+
+      return [resolveModeFileName(mode), content] as const;
+    }),
+  );
+
+  return Object.fromEntries(entries) as Record<"openclaw.md" | "claude.md" | "gpt.md", string>;
+}
+
 export async function syncEditedSkillsBeforeExport(input: {
   analysisMode: AnalysisMode;
   sourceFileName: string | null;

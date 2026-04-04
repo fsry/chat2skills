@@ -3,7 +3,8 @@ import { z } from "zod";
 
 import {
   ensureExportOutputFiles,
-  readExportOutputFile,
+  resolveAllExportContents,
+  resolveExportContent,
   resolveExportFileName,
   syncEditedSkillsBeforeExport,
 } from "@/lib/services/skill-export-service";
@@ -42,7 +43,10 @@ export async function POST(request: Request) {
 
     if (payload.analysisMode !== "all-skills") {
       const fileName = resolveExportFileName(payload.analysisMode);
-      const markdown = await readExportOutputFile(fileName);
+      const markdown = await resolveExportContent({
+        analysisMode: payload.analysisMode,
+        currentSkills: (payload.currentSkills ?? {}) as SkillContentByMode,
+      });
 
       return new Response(markdown, {
         status: 200,
@@ -55,9 +59,12 @@ export async function POST(request: Request) {
     }
 
     const zip = new JSZip();
-    const openclaw = await readExportOutputFile("openclaw.md");
-    const claude = await readExportOutputFile("claude.md");
-    const gpt = await readExportOutputFile("gpt.md");
+    const allContents = await resolveAllExportContents(
+      (payload.currentSkills ?? {}) as SkillContentByMode,
+    );
+    const openclaw = allContents["openclaw.md"];
+    const claude = allContents["claude.md"];
+    const gpt = allContents["gpt.md"];
 
     zip.file("openclaw.md", `${openclaw.trim()}\n`);
     zip.file("claude.md", `${claude.trim()}\n`);
