@@ -2,6 +2,7 @@ import JSZip from "jszip";
 import { z } from "zod";
 
 import {
+  ensureExportOutputFiles,
   readExportOutputFile,
   resolveExportFileName,
   syncEditedSkillsBeforeExport,
@@ -31,6 +32,11 @@ export async function POST(request: Request) {
       analysisMode: payload.analysisMode,
       sourceFileName: payload.sourceFileName ?? null,
       questionId: payload.questionId ?? null,
+      currentSkills: (payload.currentSkills ?? {}) as SkillContentByMode,
+    });
+
+    await ensureExportOutputFiles({
+      analysisMode: payload.analysisMode,
       currentSkills: (payload.currentSkills ?? {}) as SkillContentByMode,
     });
 

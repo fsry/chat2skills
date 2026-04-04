@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { syncEditedSkillsIfNeeded } from "@/lib/services/skill-analysis-record-service";
@@ -27,8 +27,44 @@ export async function readExportOutputFile(fileName: string) {
   }
 }
 
+async function writeExportOutputFile(fileName: string, content: string) {
+  await mkdir(OUTPUTS_ROOT, { recursive: true });
+  await writeFile(path.join(OUTPUTS_ROOT, fileName), `${content.trim()}\n`, "utf8");
+}
+
 export function resolveExportFileName(mode: SingleAnalysisMode) {
   return resolveModeFileName(mode);
+}
+
+export async function ensureExportOutputFiles(input: {
+  analysisMode: AnalysisMode;
+  currentSkills: SkillContentByMode;
+}) {
+  if (input.analysisMode === "all-skills") {
+    await Promise.all(
+      (Object.entries(input.currentSkills) as Array<[SingleAnalysisMode, string | undefined]>).flatMap(
+        ([mode, content]) => {
+          const normalizedContent = content?.trim();
+
+          if (!normalizedContent) {
+            return [];
+          }
+
+          return [writeExportOutputFile(resolveModeFileName(mode), normalizedContent)];
+        },
+      ),
+    );
+
+    return;
+  }
+
+  const singleModeContent = input.currentSkills[input.analysisMode]?.trim();
+
+  if (!singleModeContent) {
+    return;
+  }
+
+  await writeExportOutputFile(resolveModeFileName(input.analysisMode), singleModeContent);
 }
 
 export async function syncEditedSkillsBeforeExport(input: {
