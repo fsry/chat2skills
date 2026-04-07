@@ -1,7 +1,27 @@
-import { PrismaClient } from "@prisma/client";
-
 declare global {
-  var __chat2skillsPrisma: PrismaClient | undefined;
+  var __chat2skillsPrisma: PrismaClientLike | undefined;
+}
+
+type PrismaClientLike = {
+  skillAnalysisRecord: {
+    upsert: (args: unknown) => Promise<Record<string, unknown>>;
+    update: (args: unknown) => Promise<Record<string, unknown>>;
+    findUnique: (args: unknown) => Promise<{ generatedSkill?: string | null } | null>;
+  };
+};
+
+type PrismaClientConstructor = new (options?: { log?: string[] }) => PrismaClientLike;
+
+function resolvePrismaClientConstructor(): PrismaClientConstructor | null {
+  try {
+    const runtimeRequire = eval("require") as (id: string) => {
+      PrismaClient: PrismaClientConstructor;
+    };
+
+    return runtimeRequire("@prisma/client").PrismaClient;
+  } catch {
+    return null;
+  }
 }
 
 export function hasDatabaseUrl() {
@@ -10,6 +30,12 @@ export function hasDatabaseUrl() {
 
 export function getPrismaClient() {
   if (!hasDatabaseUrl()) {
+    return null;
+  }
+
+  const PrismaClient = resolvePrismaClientConstructor();
+
+  if (!PrismaClient) {
     return null;
   }
 

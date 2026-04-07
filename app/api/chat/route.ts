@@ -6,10 +6,7 @@ import type { RawQuestionAnswer } from "@/lib/types";
 export const runtime = "nodejs";
 
 const chatRequestSchema = z.object({
-  messages: z.array(z.any()).optional(),
-  userInput: z.string().optional(),
   questionId: z.string().optional(),
-  questionText: z.string().optional(),
   sourceFileName: z.string().nullable().optional(),
   providerId: z.enum(["anthropic", "openai", "google"]).optional(),
   analysisMode: z
@@ -41,10 +38,7 @@ export async function POST(request: Request) {
     const payload = chatRequestSchema.parse(await request.json());
     const result = await analyzeSkill({
       headers: request.headers,
-      messages: payload.messages,
-      userInput: payload.userInput,
       questionId: payload.questionId,
-      questionText: payload.questionText,
       sourceFileName: payload.sourceFileName ?? null,
       providerId: payload.providerId,
       analysisMode: payload.analysisMode,

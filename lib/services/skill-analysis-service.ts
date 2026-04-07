@@ -4,7 +4,7 @@ import path from "node:path";
 import { anthropic } from "@ai-sdk/anthropic";
 import { google } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
-import { generateText, type UIMessage } from "ai";
+import { generateText } from "ai";
 
 import {
   getProviderCatalogItem,
@@ -26,10 +26,7 @@ const OUTPUTS_ROOT = getOutputsRoot();
 
 type AnalyzeSkillInput = {
   headers: Headers;
-  messages?: unknown[];
-  userInput?: string;
   questionId?: string;
-  questionText?: string;
   sourceFileName?: string | null;
   providerId?: "anthropic" | "openai" | "google";
   analysisMode?: SingleAnalysisMode;
@@ -48,18 +45,39 @@ function resolveAnalysisFileName(analysisMode: SingleAnalysisMode) {
   }
 }
 
-function extractLatestUserText(messages: UIMessage[]) {
-  const latestUserMessage = [...messages].reverse().find((message) => message.role === "user");
+function buildUserInputFromRawAnswers(rawAnswers: RawQuestionAnswer[], questionId: string) {
+  const targetQuestion = rawAnswers.find((item) => item.questionId === questionId);
 
-  if (!latestUserMessage) {
-    return "";
+  if (!targetQuestion) {
+    return {
+      questionText: "",
+      userInput: "",
+    };
   }
 
-  return latestUserMessage.parts
-    .filter((part) => part.type === "text")
-    .map((part) => part.text)
-    .join("\n")
-    .trim();
+  const blocks = targetQuestion.groups.flatMap((group) =>
+    group.prompts
+      .filter((prompt) => prompt.answer.trim())
+      .map((prompt, promptIndex) => [
+        group.title ? `分组: ${group.title}` : "",
+        `问题 ${promptIndex + 1}: ${prompt.prompt}`,
+        `用户回答: ${prompt.answer.trim()}`,
+      ].filter(Boolean).join("\n")),
+  );
+
+  return {
+    questionText: [targetQuestion.title, targetQuestion.supplement].filter(Boolean).join("\n"),
+    userInput: [
+      `请整理以下章节问卷回答：${targetQuestion.title}`,
+      targetQuestion.supplement ? `章节补充内容：\n${targetQuestion.supplement}` : "",
+      "",
+      ...blocks,
+      "",
+      "请输出结构化 markdown，总结核心经验，保留用户原意。",
+    ]
+      .filter(Boolean)
+      .join("\n"),
+  };
 }
 
 function createModel(providerId: ProviderId, modelId: string) {
@@ -97,23 +115,22 @@ export async function analyzeSkill(input: AnalyzeSkillInput) {
   }
 
   const modelId = resolveModelId(provider.id);
-  const messageInput = Array.isArray(input.messages)
-    ? extractLatestUserText(input.messages as UIMessage[])
-    : "";
-  const userInput = (input.userInput?.trim() || messageInput).slice(0, MAX_USER_INPUT_CHARS);
-
-  if (!userInput) {
-    throw new Error("提交内容为空，请先填写回答后再提交。");
-  }
 
   if (!input.questionId) {
     throw new Error("请先从顶部选择一个章节。");
   }
 
+  const { questionText, userInput } = buildUserInputFromRawAnswers(input.rawAnswers, input.questionId);
+  const normalizedUserInput = userInput.slice(0, MAX_USER_INPUT_CHARS);
+
+  if (!normalizedUserInput.trim()) {
+    throw new Error("提交内容为空，请先填写回答后再提交。");
+  }
+
   const prompt = [
-    input.questionText ? `章节上下文:\n${input.questionText}` : "",
+    questionText ? `章节上下文:\n${questionText}` : "",
     "用户输入:\n",
-    userInput,
+    normalizedUserInput,
     "\n请基于以上内容生成最终结果。",
   ]
     .filter(Boolean)
@@ -180,12 +197,12 @@ export async function analyzeSkill(input: AnalyzeSkillInput) {
     headers: input.headers,
     sourceFileName: input.sourceFileName ?? null,
     questionId: input.questionId,
-    questionText: input.questionText ?? null,
+    questionText: questionText || null,
     analysisMode,
     providerId: provider.id,
     modelId,
     rawAnswers: input.rawAnswers,
-    userInput,
+    userInput: normalizedUserInput,
   });
 
   try {
@@ -200,8 +217,8 @@ export async function analyzeSkill(input: AnalyzeSkillInput) {
           model: modelId,
           sourceFileName: input.sourceFileName ?? null,
           questionId: input.questionId,
-          questionText: input.questionText ?? null,
-          userInput,
+          questionText: questionText || null,
+          userInput: normalizedUserInput,
         },
         null,
         2,
@@ -264,8 +281,8 @@ export async function analyzeSkill(input: AnalyzeSkillInput) {
         input.sourceFileName
           ? `The source question file is ${input.sourceFileName}.`
           : "",
-        input.questionText
-          ? `The selected source question is: ${input.questionText}`
+        questionText
+          ? `The selected source question is: ${questionText}`
           : "",
         "If input conflicts with selected question context, prioritize the selected question and keep the output consistent.",
       ]

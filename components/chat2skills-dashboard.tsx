@@ -10,7 +10,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import type { DashboardState, RawQuestionAnswer, SingleAnalysisMode, SkillContentByMode } from "@/lib/types";
+import type { DashboardState, RawQuestionAnswer, SkillContentByMode } from "@/lib/types";
 
 type Props = {
   initialState: DashboardState;
@@ -157,10 +157,6 @@ export function Chat2SkillsDashboard({ initialState }: Props) {
   }, [dashboardState.questions, selectedQuestionId]);
 
   useEffect(() => {
-    setInvalidPromptKeys([]);
-  }, [selectedQuestionId]);
-
-  useEffect(() => {
     if (!selectedQuestion) {
       setOrganizedResult("");
       return;
@@ -239,57 +235,45 @@ export function Chat2SkillsDashboard({ initialState }: Props) {
     }, 150);
   }
 
-  function validateCurrentQuestionAnswers() {
-    if (!selectedQuestion) {
-      return false;
-    }
+  function getQuestionIdFromPromptKey(key: string) {
+    return key.split(":")[0] ?? "";
+  }
 
-    const emptyKeys = getQuestionGroups(selectedQuestion).flatMap((group, groupIndex) =>
-      group.prompts.flatMap((_, promptIndex) => {
-        const key = promptKey(groupIndex, promptIndex);
+  function validateAllQuestionAnswers() {
+    const emptyKeys = dashboardState.questions.flatMap((question) => {
+      const groups = getQuestionGroups(question);
 
-        return getAnswer(groupIndex, promptIndex).trim() ? [] : [key];
-      }),
-    );
+      return groups.flatMap((group, groupIndex) =>
+        group.prompts.flatMap((_, promptIndex) => {
+          const key = promptKey(groupIndex, promptIndex, question.id);
+          const answer = answersByPrompt[key] ?? "";
+
+          return answer.trim() ? [] : [key];
+        }),
+      );
+    });
 
     setInvalidPromptKeys(emptyKeys);
 
     if (emptyKeys.length > 0) {
-      setStatusMessage("请先完成当前章节的所有回答，再进行分析。");
-      focusPrompt(emptyKeys[0]);
+      const firstEmptyKey = emptyKeys[0];
+      const questionId = getQuestionIdFromPromptKey(firstEmptyKey);
+
+      setStatusMessage("请先完成全部章节的所有回答，再进行分析。");
+
+      if (questionId && questionId !== selectedQuestionId) {
+        setSelectedQuestionId(questionId);
+        window.setTimeout(() => {
+          focusPrompt(firstEmptyKey);
+        }, 200);
+      } else {
+        focusPrompt(firstEmptyKey);
+      }
+
       return false;
     }
 
     return true;
-  }
-
-  function buildSectionInput() {
-    if (!selectedQuestion) {
-      return "";
-    }
-
-    const groups = getQuestionGroups(selectedQuestion);
-
-    const promptBlocks = groups.flatMap((group, groupIndex) =>
-      group.prompts.map((prompt, promptIndex) => {
-        const answer = getAnswer(groupIndex, promptIndex).trim();
-
-        return [
-          group.title ? `分组: ${group.title}` : "",
-          `问题 ${promptIndex + 1}: ${prompt}`,
-          `用户回答: ${answer || "（未填写）"}`,
-        ].join("\n");
-      }),
-    );
-
-    return [
-      `请整理以下章节问卷回答：${selectedQuestion.title}`,
-      selectedQuestion.supplement ? `章节补充内容：\n${selectedQuestion.supplement}` : "",
-      "",
-      ...promptBlocks,
-      "",
-      "请输出结构化 markdown，总结核心经验，保留用户原意。",
-    ].join("\n");
   }
 
   function buildRawAnswersPayload(): RawQuestionAnswer[] {
@@ -535,7 +519,7 @@ export function Chat2SkillsDashboard({ initialState }: Props) {
       return;
     }
 
-    if (!validateCurrentQuestionAnswers()) {
+    if (!validateAllQuestionAnswers()) {
       return;
     }
 
@@ -547,12 +531,6 @@ export function Chat2SkillsDashboard({ initialState }: Props) {
       setStatusMessage(
         "请至少配置一个模型密钥：ANTHROPIC_API_KEY / OPENAI_API_KEY / GOOGLE_GENERATIVE_AI_API_KEY。",
       );
-      return;
-    }
-
-    const text = buildSectionInput().trim();
-    if (!text) {
-      setStatusMessage("请先填写当前章节下的问题回答。");
       return;
     }
 
@@ -571,20 +549,18 @@ export function Chat2SkillsDashboard({ initialState }: Props) {
       throw new Error("请先从顶部选择一个章节。");
     }
 
-    const text = buildSectionInput().trim();
+    const rawAnswers = buildRawAnswersPayload();
     const response = await fetch("/api/chat", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        userInput: text,
         questionId: selectedQuestionId,
-        questionText: selectedQuestion.text,
         sourceFileName: dashboardState.importedFile?.fileName ?? null,
         providerId: selectedProviderId,
         analysisMode: mode,
-        rawAnswers: buildRawAnswersPayload(),
+        rawAnswers,
       }),
     });
 
